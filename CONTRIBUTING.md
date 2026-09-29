@@ -1,4 +1,4 @@
-# Contribuindo com o Enterview
+# Contribuindo com o Dunots 
 
 Obrigado pelo interesse em contribuir! Este documento explica como preparar o ambiente, propor mudanças e abrir pull requests.
 

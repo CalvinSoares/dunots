@@ -2,7 +2,7 @@
 
 ## Nosso compromisso
 
-Como membros, colaboradores e mantenedores da comunidade Enterview, nos comprometemos a tornar a participação uma experiência livre de assédio para todas as pessoas, independentemente de idade, deficiência, etnia, identidade ou expressão de gênero, nível de experiência, nacionalidade, aparência, raça, religião ou orientação sexual.
+Como membros, colaboradores e mantenedores da comunidade Dunots , nos comprometemos a tornar a participação uma experiência livre de assédio para todas as pessoas, independentemente de idade, deficiência, etnia, identidade ou expressão de gênero, nível de experiência, nacionalidade, aparência, raça, religião ou orientação sexual.
 
 ## Comportamento esperado
 
