@@ -1,6 +1,6 @@
 # Changelog
 
-Todas as mudanças relevantes do Enterview serão registradas neste arquivo.
+Todas as mudanças relevantes do Dunots serão registradas neste arquivo.
 
 O formato segue a ideia de [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e usa versões [SemVer](https://semver.org/lang/pt-BR/).
 

@@ -6,7 +6,7 @@ Plataforma open-source de estudos com base em flashcards, simulados para provas 
 
 ## Sobre
 
-O Enterview é um ambiente flexível para transformar perguntas em sessões de estudo, preparação ou avaliação. A proposta é reunir criação de conteúdo, organização das sessões e acompanhamento do desempenho em uma única plataforma.
+O Dunots é um ambiente flexível para transformar perguntas em sessões de estudo, preparação ou avaliação. A proposta é reunir criação de conteúdo, organização das sessões e acompanhamento do desempenho em uma única plataforma.
 
 ## Para que serve
 

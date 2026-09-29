@@ -1,6 +1,6 @@
 # Roadmap
 
-Este roadmap indica a direção desejada do Enterview como plataforma de estudos, preparação e avaliação baseada em perguntas. Ele pode mudar conforme o feedback da comunidade e as prioridades do projeto.
+Este roadmap indica a direção desejada do Dunots como plataforma de estudos, preparação e avaliação baseada em perguntas. Ele pode mudar conforme o feedback da comunidade e as prioridades do projeto.
 
 ## Em andamento
 
