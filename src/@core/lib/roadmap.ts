@@ -185,6 +185,36 @@ export function parseRoadmapImportText(text: string): RoadmapImportItem[] {
   if (inCodeBlock) appendCodeToLastItem(codeLines.join(" ").trim());
   return items;
 }
+
+export function formatRoadmapImportText(nodes: StudyRoadmapNode[]) {
+  const children = buildRoadmapChildren(nodes);
+  const visited = new Set<string>();
+  const lines: string[] = [];
+
+  const visit = (parentId: string | undefined, depth: number) => {
+    for (const node of children.get(parentId) ?? []) {
+      if (visited.has(node.id)) continue;
+      visited.add(node.id);
+      const title = node.title.trim();
+      if (!title) continue;
+      const description = node.description?.replace(/\s+/g, " ").trim();
+      lines.push(`${"  ".repeat(depth)}${title}${description ? ` | ${description}` : ""}`);
+      visit(node.id, depth + 1);
+    }
+  };
+
+  visit(undefined, 0);
+
+  // Preserva nós órfãos caso uma importação antiga tenha perdido o pai.
+  for (const node of nodes) {
+    if (visited.has(node.id) || !node.title.trim()) continue;
+    const description = node.description?.replace(/\s+/g, " ").trim();
+    lines.push(`${node.title.trim()}${description ? ` | ${description}` : ""}`);
+  }
+
+  return lines.join("\n");
+}
+
 export interface RoadmapMaterialProgress {
   total: number;
   completed: number;

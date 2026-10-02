@@ -103,6 +103,13 @@ try {
     { title: "Consultas", depth: 2 },
     { title: "Redes", depth: 0 },
   ]);
+  const exportedRoadmap = roadmap.formatRoadmapImportText([
+    { id: "export-topic", roadmapId: "r1", kind: "topic", title: "Redes", description: "Base de redes", order: 0, completed: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    { id: "export-child", roadmapId: "r1", parentId: "export-topic", kind: "subtopic", title: "Topologias", description: "Física e lógica", order: 0, completed: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    { id: "export-grandchild", roadmapId: "r1", parentId: "export-child", kind: "subtopic", title: "Estrela", order: 0, completed: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+  ]);
+  assert.equal(exportedRoadmap, "Redes | Base de redes\n  Topologias | Física e lógica\n    Estrela");
+  assert.deepEqual(roadmap.parseRoadmapImportText(exportedRoadmap).map((item) => item.title), ["Redes", "Topologias", "Estrela"]);
   const codeFence = String.fromCharCode(96).repeat(3);
   const bulkItems = roadmap.parseRoadmapImportText("- Topologia em Malha | Conexões redundantes\n  - Malha Completa | Usa N(N−1)2 enlaces\n- Arquitetura Spine-and-Leaf | Rede Clos\n" + codeFence + "\nN−1\n" + codeFence + "\n↔");
   assert.deepEqual(bulkItems.map((item) => ({ title: item.title, depth: item.depth })), [
