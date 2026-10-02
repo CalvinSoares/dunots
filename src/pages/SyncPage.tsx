@@ -130,10 +130,18 @@ export function SyncPanel({ activeTab, onPackageReceived }: { activeTab?: SyncTa
     setMessage("");
     try {
       const syncPackage = await createSyncPackage(identity);
-      downloadSyncPackage(syncPackage);
-      setMessage("Pacote criado. Transfira o arquivo .dunots para o outro notebook.");
-    } catch {
-      setError("Não foi possível criar o pacote de sincronização.");
+      if (desktop) {
+        const savedPath = await invoke<string>("save_sync_package", {
+          package: JSON.stringify(syncPackage),
+        });
+        const fileName = savedPath.split(/[\\/]/).pop() || "dunots-sync.dunots";
+        setMessage(`Pacote salvo em Downloads: ${fileName}`);
+      } else {
+        downloadSyncPackage(syncPackage);
+        setMessage("Pacote criado. Transfira o arquivo .dunots para o outro notebook.");
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível criar o pacote de sincronização.");
     } finally {
       setBusy(false);
     }
