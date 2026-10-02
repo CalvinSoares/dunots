@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createServer } from "vite";
 
 const server = await createServer({
@@ -15,9 +16,37 @@ try {
   const sync = await server.ssrLoadModule("/src/@core/lib/sync.ts");
   const question = (id, topic = "redes") => ({ id, examId: "exam-1", statement: "enunciado", options: [{ id: "A", text: "sim" }, { id: "B", text: "não" }], correctOption: "A", subject: "TI", topic, createdAt: "2026-01-01", updatedAt: "2026-01-01" });
   const syncPackage = sync.parseSyncPackage({ format: "dunots-sync", version: 1, exportedAt: "2026-09-22T00:00:00.000Z", source: { deviceId: "other", deviceName: "Outro notebook" }, collections: { flashcards: [{ id: "fc-1", updatedAt: "2026-09-22T00:00:00.000Z" }], quiz_questions: [{ id: "q-1", updatedAt: "2026-09-22T00:00:00.000Z" }], quiz_exams: [], leetcode_problems: [], articles: [], snippets: [], study_phases: [], diagrams: [], quiz_attempts: [], study_roadmaps: [], roadmap_nodes: [], roadmap_links: [] } });
-  const syncPreview = sync.previewSyncPackage({ flashcards: [], quiz_questions: [{ id: "q-1", updatedAt: "2026-09-21T00:00:00.000Z" }], quiz_exams: [], leetcode_problems: [], articles: [], snippets: [], study_phases: [], diagrams: [], quiz_attempts: [], study_roadmaps: [], roadmap_nodes: [], roadmap_links: [] }, syncPackage);
+  const syncPreview = sync.previewSyncPackage({ flashcards: [], quiz_questions: [{ id: "q-1", updatedAt: "2026-09-21T00:00:00.000Z" }], quiz_exams: [], leetcode_problems: [], challenge_reviews: [], articles: [], snippets: [], study_phases: [], diagrams: [], quiz_attempts: [], study_roadmaps: [], roadmap_nodes: [], roadmap_links: [], sync_tombstones: [] }, syncPackage);
   assert.equal(syncPreview.added, 1);
   assert.equal(syncPreview.updated, 1);
+
+  const desktopFixture = JSON.parse(await readFile("mobile/test/fixtures/desktop_sync_v1.dunots.json", "utf8"));
+  const parsedDesktopFixture = sync.parseSyncPackage(desktopFixture);
+  assert.equal(parsedDesktopFixture.source.deviceName, "Dunots Desktop");
+  assert.equal(parsedDesktopFixture.collections.quiz_questions[0].correctOption, "B");
+  assert.equal(parsedDesktopFixture.collections.diagrams[0].nodes[0].data.label, "Switch");
+
+  const mobileFixture = JSON.parse(await readFile("mobile/test/fixtures/mobile_sync_v1.dunots.json", "utf8"));
+  const parsedMobileFixture = sync.parseSyncPackage(mobileFixture);
+  assert.equal(parsedMobileFixture.source.deviceName, "Dunots Mobile");
+  assert.equal(parsedMobileFixture.collections.study_roadmaps[0].updatedAt, "2026-10-01T12:00:00.000Z");
+  assert.equal(parsedMobileFixture.collections.roadmap_links[0].id, "mobile-node-1:mobile-card-1:flashcard");
+  const desktopWebCryptoEnvelope = await readFile("mobile/test/fixtures/desktop_webcrypto_envelope.json", "utf8");
+  const decryptedDesktopPayload = await sync.decryptSyncPayload(desktopWebCryptoEnvelope, "pairing-token");
+  assert.equal(decryptedDesktopPayload.source.deviceId, "mobile-test");
+  const pairingInvite = sync.parsePairingInvite({
+    format: "dunots-pairing",
+    version: 1,
+    address: "http://127.0.0.1:43127",
+    token: "pairing-token",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  });
+  assert.equal(pairingInvite.address, "http://127.0.0.1:43127");
+  assert.equal(sync.parsePairingInvite({
+    address: "http://127.0.0.1:43127",
+    token: "legacy-token",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  }).token, "legacy-token");
 
   assert.equal(quiz.getAttemptStatus({ status: "completed" }), "completed");
   assert.equal(quiz.getAttemptStatus({ finishedAt: "2026-01-01" }), "completed");

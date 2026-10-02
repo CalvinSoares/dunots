@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Copy, Download, FileUp, RefreshCw, ShieldCheck, Smartphone, Upload, Wifi } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BrowserQRCodeReader } from "@zxing/browser";
+import QRCode from "qrcode";
+import { CheckCircle2, Copy, Download, FileUp, QrCode, RefreshCw, ScanLine, ShieldCheck, Smartphone, Upload, Wifi } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { RetroBadge } from "@/components/ui/RetroBadge";
 import { RetroButton } from "@/components/ui/RetroButton";
 import { RetroCard } from "@/components/ui/RetroCard";
-import { applySyncPackage, createSyncPackage, decryptSyncPayload, downloadSyncPackage, encryptSyncPackage, getDeviceIdentity, makePairingToken, parseSyncPackage, previewSyncPackage, readLocalSyncData, saveDeviceName, type ConflictChoice, type SyncHostInfo, type SyncIdentity, type SyncPackage, type SyncPreview, type SyncRecord } from "@core/lib/sync";
+import { applySyncPackage, createSyncPackage, decryptSyncPayload, downloadSyncPackage, encodePairingInvite, encryptSyncPackage, getDeviceIdentity, makePairingToken, parsePairingInvite, parseSyncPackage, previewSyncPackage, readLocalSyncData, saveDeviceName, type ConflictChoice, type SyncHostInfo, type SyncIdentity, type SyncPackage, type SyncPreview, type SyncRecord } from "@core/lib/sync";
 
 function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "sem data registrada";
@@ -24,6 +26,47 @@ function SummaryItem({ label, value, tone }: { label: string; value: number; ton
   return <RetroCard accent={tone} className="!p-4"><p className="text-2xl font-bold text-retro-text">{value}</p><p className="mt-1 text-[12px] text-retro-comment">{label}</p></RetroCard>;
 }
 
+function PairingQr({ value }: { value: string }) {
+  const [src, setSrc] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    void QRCode.toDataURL(value, { width: 220, margin: 2, errorCorrectionLevel: "M" }).then((dataUrl) => {
+      if (active) setSrc(dataUrl);
+    });
+    return () => { active = false; };
+  }, [value]);
+
+  return <div className="inline-flex rounded-wobbly bg-white p-3" aria-label="QR Code do convite de pareamento">
+    {src ? <img src={src} alt="QR Code do convite de pareamento" className="h-52 w-52" /> : <div className="flex h-52 w-52 items-center justify-center text-xs text-slate-500">gerando QR...</div>}
+  </div>;
+}
+
+function PairingQrScanner({ onDetected }: { onDetected: (value: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const reader = new BrowserQRCodeReader();
+    let controls: { stop: () => void } | undefined;
+    void reader.decodeFromVideoDevice(undefined, video, (result) => {
+      const value = result?.getText();
+      if (value) onDetected(value);
+    }).then((nextControls) => {
+      controls = nextControls;
+    }).catch(() => setError("Não foi possível acessar a câmera deste dispositivo."));
+    return () => controls?.stop();
+  }, [onDetected]);
+
+  return <div className="space-y-2 rounded-wobbly border border-retro-purple/50 bg-retro-purple/10 p-3">
+    <video ref={videoRef} className="aspect-video w-full rounded-wobbly bg-black object-cover" muted playsInline />
+    <p className="text-[12px] text-retro-comment">Aponte a câmera para o QR Code exibido no outro dispositivo.</p>
+    {error && <p className="text-[12px] text-retro-red">{error}</p>}
+  </div>;
+}
+
 export type SyncTab = "pair" | "files" | "conflicts";
 
 export function SyncPanel({ activeTab, onPackageReceived }: { activeTab?: SyncTab; onPackageReceived?: (tab: SyncTab) => void }) {
@@ -41,6 +84,7 @@ export function SyncPanel({ activeTab, onPackageReceived }: { activeTab?: SyncTa
   const [error, setError] = useState("");
   const [fileName, setFileName] = useState("");
   const [applied, setApplied] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   useEffect(() => () => {
@@ -160,6 +204,19 @@ export function SyncPanel({ activeTab, onPackageReceived }: { activeTab?: SyncTa
     }
   };
 
+  const handleScannedInvite = (value: string) => {
+    try {
+      const invite = parsePairingInvite(JSON.parse(value));
+      setRemoteAddress(invite.address);
+      setRemoteToken(invite.token);
+      setScannerOpen(false);
+      setMessage("Convite lido. Confirme o recebimento para iniciar o pareamento.");
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "QR Code de pareamento inválido.");
+    }
+  };
+
   const handleSendBack = async () => {
     if (!remoteSession) return;
     setPairingBusy(true);
@@ -216,7 +273,7 @@ export function SyncPanel({ activeTab, onPackageReceived }: { activeTab?: SyncTa
     }
   };
 
-  const hostInvite = hostInfo ? hostInfo.address + "\n" + hostInfo.token : "";
+  const hostInvite = hostInfo ? encodePairingInvite(hostInfo) : "";
 
   const compact = activeTab !== undefined;
 
@@ -232,14 +289,15 @@ export function SyncPanel({ activeTab, onPackageReceived }: { activeTab?: SyncTa
           <div className="space-y-3">
             <h2 className="font-semibold text-retro-text">Notebook que envia</h2>
             <p className="text-[13px] leading-relaxed text-retro-text-dim">Inicie um compartilhamento temporário. O pacote é criptografado antes de sair do dispositivo, o token inicial expira em 10 minutos e só pode abrir uma sessão.</p>
-            {!hostInfo ? <RetroButton variant="primary" onClick={() => void handleStartHost()} disabled={pairingBusy} icon={<Wifi size={15} />}>{pairingBusy ? "iniciando..." : "iniciar compartilhamento"}</RetroButton> : <div className="space-y-3 rounded-wobbly border border-retro-green/50 bg-retro-green/10 p-3"><div><p className="text-[11px] uppercase tracking-wider text-retro-comment">endereço</p><code className="mt-1 block break-all text-[13px] text-retro-blue">{hostInfo.address}</code></div><div><p className="text-[11px] uppercase tracking-wider text-retro-comment">token de pareamento</p><code className="mt-1 block break-all text-[13px] text-retro-blue">{hostInfo.token}</code></div><p className="text-[12px] text-retro-comment">Expira às {formatHostExpiry(hostInfo.expires_at)}. Após o recebimento, o retorno usa uma sessão diferente e de uso único.</p><div className="flex flex-wrap gap-2"><RetroButton onClick={() => void handleCopy(hostInvite)} icon={<Copy size={14} />}>copiar convite</RetroButton><RetroButton onClick={() => void handleStopHost()}>encerrar</RetroButton></div></div>}
+            {!hostInfo ? <RetroButton variant="primary" onClick={() => void handleStartHost()} disabled={pairingBusy} icon={<Wifi size={15} />}>{pairingBusy ? "iniciando..." : "iniciar compartilhamento"}</RetroButton> : <div className="space-y-3 rounded-wobbly border border-retro-green/50 bg-retro-green/10 p-3"><div className="flex flex-wrap items-start gap-4"><PairingQr value={hostInvite} /><div className="min-w-0 flex-1 space-y-3"><div><p className="text-[11px] uppercase tracking-wider text-retro-comment">endereço</p><code className="mt-1 block break-all text-[13px] text-retro-blue">{hostInfo.address}</code></div><div><p className="text-[11px] uppercase tracking-wider text-retro-comment">token de pareamento</p><code className="mt-1 block break-all text-[13px] text-retro-blue">{hostInfo.token}</code></div><p className="text-[12px] text-retro-comment">Expira às {formatHostExpiry(hostInfo.expires_at)}. Após o recebimento, o retorno usa uma sessão diferente e de uso único.</p></div></div><div className="flex flex-wrap gap-2"><RetroButton onClick={() => void handleCopy(hostInvite)} icon={<Copy size={14} />}>copiar convite</RetroButton><RetroButton onClick={() => void handleStopHost()}>encerrar</RetroButton></div></div>}
           </div>
           <div className="space-y-3">
             <h2 className="font-semibold text-retro-text">Notebook que recebe</h2>
             <p className="text-[13px] leading-relaxed text-retro-text-dim">Informe o endereço e o token exibidos pelo dispositivo que está enviando. O token não é armazenado no pacote.</p>
             <label className="block text-[13px] text-retro-text-dim">Endereço do outro notebook<input value={remoteAddress} onChange={(event) => setRemoteAddress(event.target.value)} className="retro-input mt-1" placeholder="Ex.: http://192.168.0.15:43127" /></label>
             <label className="block text-[13px] text-retro-text-dim">Token<input value={remoteToken} onChange={(event) => setRemoteToken(event.target.value)} className="retro-input mt-1" placeholder="Cole o token temporário" /></label>
-            <RetroButton variant="primary" onClick={() => void handleConnect()} disabled={pairingBusy} icon={<Download size={15} />}>{pairingBusy ? "conectando..." : "receber pacote pela rede"}</RetroButton>
+            <div className="flex flex-wrap gap-2"><RetroButton variant="primary" onClick={() => void handleConnect()} disabled={pairingBusy} icon={<Download size={15} />}>{pairingBusy ? "conectando..." : "receber pacote pela rede"}</RetroButton><RetroButton onClick={() => setScannerOpen((current) => !current)} icon={scannerOpen ? <QrCode size={15} /> : <ScanLine size={15} />}>{scannerOpen ? "fechar leitor" : "ler QR Code"}</RetroButton></div>
+            {scannerOpen && <PairingQrScanner onDetected={handleScannedInvite} />}
           </div>
         </div>}
       </RetroCard>}
