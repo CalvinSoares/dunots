@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Download,
   Flag,
   FilePlus2,
   CheckCircle2,
@@ -15,10 +16,11 @@ import {
   Target,
   Trash2,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { ProgressBar, RoadmapTree } from "@/components/features/roadmaps/RoadmapTree";
 import { LinkModal, NodeFormModal, RoadmapFormModal, SubtopicQuickCreateModal, type NodeForm, type RoadmapForm, type SubtopicQuickCreateForm } from "@/components/features/roadmaps/RoadmapModals";
 import { RoadmapImportModal } from "@/components/features/roadmaps/RoadmapImportModal";
-import { getRoadmapMaterialProgress, getRoadmapPriorityWeight, getRoadmapProgress, parseRoadmapImportText, ROADMAP_PRIORITY_OPTIONS } from "@core/lib/roadmap";
+import { formatRoadmapImportText, getRoadmapMaterialProgress, getRoadmapPriorityWeight, getRoadmapProgress, parseRoadmapImportText, ROADMAP_PRIORITY_OPTIONS } from "@core/lib/roadmap";
 import type { StudyRoadmap, StudyRoadmapLink, StudyRoadmapNode, StudyRoadmapPriority } from "@core/types/roadmap";
 import { useRoadmapStore } from "@/store/useRoadmapStore";
 import { useFlashcardStore } from "@/store/useFlashcardStore";
@@ -89,6 +91,9 @@ export function RoadmapsPage() {
   const [subtopicParent, setSubtopicParent] = useState<StudyRoadmapNode | null>(null);
   const [subtopicModalOpen, setSubtopicModalOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<"all" | StudyRoadmapPriority>("all");
+  const [exportingRoadmap, setExportingRoadmap] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   const selectedRoadmap = roadmaps.find((roadmap) => roadmap.id === selectedId) ?? roadmaps[0] ?? null;
   const roadmapNodes = useMemo(() => selectedRoadmap ? nodes.filter((node) => node.roadmapId === selectedRoadmap.id) : [], [nodes, selectedRoadmap]);
@@ -176,6 +181,34 @@ export function RoadmapsPage() {
     setRoadmapModal({ open: false, editing: null });
   };
 
+  const exportSelectedRoadmap = async () => {
+    if (!selectedRoadmap || roadmapNodes.length === 0) return;
+    setExportingRoadmap(true);
+    setExportMessage(null);
+    try {
+      const text = formatRoadmapImportText(roadmapNodes);
+      if (desktop) {
+        const savedPath = await invoke<string>("save_roadmap_import", { title: selectedRoadmap.title, text });
+        setExportMessage(`Formato salvo em Downloads: ${savedPath.split(/[\\/]/).pop() ?? "trilha-importacao.txt"}`);
+      } else {
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `${selectedRoadmap.title.replace(/[<>:"/\\|?*]+/g, "-").trim() || "trilha"}-importacao.txt`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setExportMessage("Formato exportado. O arquivo está pronto para a criação em massa.");
+      }
+    } catch (cause) {
+      setExportMessage(cause instanceof Error ? cause.message : "Não foi possível exportar a trilha.");
+    } finally {
+      setExportingRoadmap(false);
+    }
+  };
+
   const saveNode = async (form: NodeForm) => {
     if (!selectedRoadmap) return;
     if (nodeModal.editing) {
@@ -242,7 +275,7 @@ export function RoadmapsPage() {
               <div className="flex gap-2"><RetroButton variant="ghost" icon={<Pencil size={13} />} onClick={() => setRoadmapModal({ open: true, editing: selectedRoadmap })}>editar</RetroButton><RetroButton variant="ghost" icon={<Trash2 size={13} />} onClick={() => setRoadmapToDelete(selectedRoadmap)}>excluir</RetroButton></div>
             </div>
             <div className="my-5 p-4 rounded-xl border border-retro-border bg-retro-panelHover"><div className="flex items-center justify-between text-[12px] mb-2"><span className="text-retro-text flex items-center gap-2"><CheckCircle2 size={15} className="text-retro-green" /> progresso dos itens</span><strong className="text-retro-blue">{progress.completed}/{progress.total} · {progress.percentage}%</strong></div><ProgressBar value={progress.percentage} /></div>
-            <div className="mb-5 grid grid-cols-2 gap-2"><div className="rounded-lg border border-retro-border/60 bg-retro-panelHover p-3"><span className="block text-[10px] uppercase tracking-wider text-retro-comment">materiais revisados</span><strong className="block mt-1 text-retro-text">{materialProgress.completed}/{materialProgress.total}</strong><span className="text-[11px] text-retro-comment">{materialProgress.percentage}% do tópico</span></div><div className="rounded-lg border border-retro-border/60 bg-retro-panelHover p-3"><span className="block text-[10px] uppercase tracking-wider text-retro-comment">composição</span><strong className="block mt-1 text-retro-text">{materialProgress.flashcardsCompleted}/{materialProgress.flashcardsTotal} cartões</strong><span className="text-[11px] text-retro-comment">{materialProgress.questionsAnswered}/{materialProgress.questionsTotal} questões</span></div></div><div className="flex items-center justify-between gap-2 mb-3"><div><h3 className="text-retro-text font-semibold">Conteúdo da trilha</h3><p className="text-[12px] text-retro-comment">Marque os nós concluídos ou abra um item para editar.</p></div><div className="flex gap-2"><RetroButton variant="ghost" icon={<FilePlus2 size={13} />} onClick={() => setImportModalOpen(true)}>importar edital</RetroButton><RetroButton icon={<Plus size={13} />} onClick={() => setNodeModal({ open: true, editing: null })}>novo tópico</RetroButton></div></div>
+            <div className="mb-5 grid grid-cols-2 gap-2"><div className="rounded-lg border border-retro-border/60 bg-retro-panelHover p-3"><span className="block text-[10px] uppercase tracking-wider text-retro-comment">materiais revisados</span><strong className="block mt-1 text-retro-text">{materialProgress.completed}/{materialProgress.total}</strong><span className="text-[11px] text-retro-comment">{materialProgress.percentage}% do tópico</span></div><div className="rounded-lg border border-retro-border/60 bg-retro-panelHover p-3"><span className="block text-[10px] uppercase tracking-wider text-retro-comment">composição</span><strong className="block mt-1 text-retro-text">{materialProgress.flashcardsCompleted}/{materialProgress.flashcardsTotal} cartões</strong><span className="text-[11px] text-retro-comment">{materialProgress.questionsAnswered}/{materialProgress.questionsTotal} questões</span></div></div><div className="flex items-center justify-between gap-2 mb-3"><div><h3 className="text-retro-text font-semibold">Conteúdo da trilha</h3><p className="text-[12px] text-retro-comment">Marque os nós concluídos ou abra um item para editar.</p>{exportMessage && <p className="mt-1 text-[11px] text-retro-green">{exportMessage}</p>}</div><div className="flex gap-2"><RetroButton variant="ghost" disabled={exportingRoadmap || roadmapNodes.length === 0} icon={<Download size={13} />} onClick={() => void exportSelectedRoadmap}>{exportingRoadmap ? "exportando..." : "exportar em massa"}</RetroButton><RetroButton variant="ghost" icon={<FilePlus2 size={13} />} onClick={() => setImportModalOpen(true)}>importar edital</RetroButton><RetroButton icon={<Plus size={13} />} onClick={() => setNodeModal({ open: true, editing: null })}>novo tópico</RetroButton></div></div>
             <div className='mb-3 flex items-center gap-3 flex-wrap'>
               <div className='flex items-center gap-2 text-[11px] uppercase tracking-wider text-retro-comment'><Flag size={13} className='text-retro-orange' /> filtrar prioridade</div>
               <div className='w-full sm:w-64'><SearchableDropdown items={[{ id: 'all', label: 'todas as prioridades' }, ...ROADMAP_PRIORITY_OPTIONS.filter((option) => option.id !== 'none').map((option) => ({ id: option.id, label: option.label + ' ou maior', description: option.description }))]} value={priorityFilter} onChange={(value) => setPriorityFilter(value as 'all' | StudyRoadmapPriority)} placeholder='Todas as prioridades...' searchPlaceholder='Buscar prioridade...' charLimit={32} /></div>
