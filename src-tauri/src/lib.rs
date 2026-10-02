@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::{
+    fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{
@@ -9,6 +10,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 static SYNC_STOP: OnceLock<Mutex<Option<Arc<AtomicBool>>>> = OnceLock::new();
@@ -77,7 +79,11 @@ fn read_http_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
                 .lines()
                 .find_map(|line| {
                     let (name, value) = line.split_once(':')?;
-                    if name.eq_ignore_ascii_case("Content-Length") { value.trim().parse::<usize>().ok() } else { None }
+                    if name.eq_ignore_ascii_case("Content-Length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
                 })
                 .unwrap_or(0);
             break;
@@ -110,13 +116,22 @@ fn bearer_token(headers: &str) -> Option<String> {
 }
 
 fn new_session_token() -> String {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_nanos()).unwrap_or_default();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or_default();
     format!("session-{nanos:x}-{}", std::process::id())
 }
 
 fn handle_sync_connection(mut stream: TcpStream, session: &SyncSession) {
-    let Some((headers, body)) = read_http_request(&mut stream) else { return; };
-    let mut request_parts = headers.lines().next().unwrap_or_default().split_whitespace();
+    let Some((headers, body)) = read_http_request(&mut stream) else {
+        return;
+    };
+    let mut request_parts = headers
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .split_whitespace();
     let method = request_parts.next().unwrap_or_default();
     let path = request_parts.next().unwrap_or_default();
     if method == "OPTIONS" {
@@ -125,38 +140,68 @@ fn handle_sync_connection(mut stream: TcpStream, session: &SyncSession) {
     }
     let provided_token = bearer_token(&headers).unwrap_or_default();
     if path != "/dunots-sync" {
-        let _ = stream.write_all(http_response("404 Not Found", "application/json", r#"{"error":"not found"}"#).as_bytes());
+        let _ = stream.write_all(
+            http_response(
+                "404 Not Found",
+                "application/json",
+                r#"{"error":"not found"}"#,
+            )
+            .as_bytes(),
+        );
         return;
     }
-    if method == "GET" && provided_token == session.pairing_token && !session.pairing_consumed.swap(true, Ordering::AcqRel) {
+    if method == "GET"
+        && provided_token == session.pairing_token
+        && !session.pairing_consumed.swap(true, Ordering::AcqRel)
+    {
         let session_token = new_session_token();
         if let Ok(mut current) = session.session_token.lock() {
             *current = Some(session_token.clone());
         }
-        let body = format!(r#"{{"package":{},"sessionToken":"{}"}}"#, session.package, session_token);
+        let body = format!(
+            r#"{{"package":{},"sessionToken":"{}"}}"#,
+            session.package, session_token
+        );
         let _ = stream.write_all(http_response("200 OK", "application/json", &body).as_bytes());
         return;
     }
     if method == "POST" {
-        let is_session = session.session_token.lock().map(|mut current| {
-            if current.as_deref() == Some(provided_token.as_str()) {
-                *current = None;
-                true
-            } else {
-                false
-            }
-        }).unwrap_or(false);
+        let is_session = session
+            .session_token
+            .lock()
+            .map(|mut current| {
+                if current.as_deref() == Some(provided_token.as_str()) {
+                    *current = None;
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
         if is_session {
             if let Ok(payload) = String::from_utf8(body) {
                 if let Ok(mut incoming) = sync_incoming_state().lock() {
-                    *incoming = Some(SyncIncoming { payload, secret: provided_token });
+                    *incoming = Some(SyncIncoming {
+                        payload,
+                        secret: provided_token,
+                    });
                 }
-                let _ = stream.write_all(http_response("202 Accepted", "application/json", r#"{"accepted":true}"#).as_bytes());
+                let _ = stream.write_all(
+                    http_response("202 Accepted", "application/json", r#"{"accepted":true}"#)
+                        .as_bytes(),
+                );
                 return;
             }
         }
     }
-    let _ = stream.write_all(http_response("401 Unauthorized", "application/json", r#"{"error":"invalid or expired pairing token"}"#).as_bytes());
+    let _ = stream.write_all(
+        http_response(
+            "401 Unauthorized",
+            "application/json",
+            r#"{"error":"invalid or expired pairing token"}"#,
+        )
+        .as_bytes(),
+    );
 }
 
 #[tauri::command]
@@ -164,43 +209,96 @@ fn start_sync_host(package: String, token: String) -> Result<SyncHostInfo, Strin
     if package.is_empty() || token.trim().is_empty() {
         return Err("Pacote ou token de pareamento vazio.".to_string());
     }
-    let listener = TcpListener::bind("0.0.0.0:0").map_err(|error| format!("Não foi possível abrir a porta local: {error}"))?;
-    listener.set_nonblocking(true).map_err(|error| format!("Não foi possível preparar o servidor: {error}"))?;
-    let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+    let listener = TcpListener::bind("0.0.0.0:0")
+        .map_err(|error| format!("Não foi possível abrir a porta local: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("Não foi possível preparar o servidor: {error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
     let stop = Arc::new(AtomicBool::new(false));
     if let Ok(mut current) = sync_stop_state().lock() {
-        if let Some(previous) = current.take() { previous.store(true, Ordering::Relaxed); }
+        if let Some(previous) = current.take() {
+            previous.store(true, Ordering::Relaxed);
+        }
         *current = Some(stop.clone());
     }
-    if let Ok(mut incoming) = sync_incoming_state().lock() { *incoming = None; }
-    let session = Arc::new(SyncSession { package, pairing_token: token.clone(), session_token: Mutex::new(None), pairing_consumed: AtomicBool::new(false) });
+    if let Ok(mut incoming) = sync_incoming_state().lock() {
+        *incoming = None;
+    }
+    let session = Arc::new(SyncSession {
+        package,
+        pairing_token: token.clone(),
+        session_token: Mutex::new(None),
+        pairing_consumed: AtomicBool::new(false),
+    });
     let server_session = session.clone();
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(600);
         while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
             match listener.accept() {
                 Ok((stream, _)) => handle_sync_connection(stream, &server_session),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(100)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(100))
+                }
                 Err(_) => break,
             }
         }
         stop.store(true, Ordering::Relaxed);
     });
-    let expires_at = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_secs() + 600;
-    Ok(SyncHostInfo { address: format!("http://{}:{port}", local_ip()), token, expires_at })
+    let expires_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs()
+        + 600;
+    Ok(SyncHostInfo {
+        address: format!("http://{}:{port}", local_ip()),
+        token,
+        expires_at,
+    })
+}
+
+#[tauri::command]
+fn save_sync_package(app: tauri::AppHandle, package: String) -> Result<String, String> {
+    if package.trim().is_empty() {
+        return Err("Pacote de sincronização vazio.".to_string());
+    }
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| format!("Não foi possível localizar a pasta Downloads: {error}"))?;
+    fs::create_dir_all(&downloads)
+        .map_err(|error| format!("Não foi possível preparar a pasta Downloads: {error}"))?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    let path = downloads.join(format!("dunots-sync-{timestamp}.dunots"));
+    fs::write(&path, package)
+        .map_err(|error| format!("Não foi possível salvar o pacote: {error}"))?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
 fn stop_sync_host() {
     if let Ok(mut current) = sync_stop_state().lock() {
-        if let Some(stop) = current.take() { stop.store(true, Ordering::Relaxed); }
+        if let Some(stop) = current.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
     }
-    if let Ok(mut incoming) = sync_incoming_state().lock() { *incoming = None; }
+    if let Ok(mut incoming) = sync_incoming_state().lock() {
+        *incoming = None;
+    }
 }
 
 #[tauri::command]
 fn take_sync_incoming() -> Option<SyncIncoming> {
-    sync_incoming_state().lock().ok().and_then(|mut incoming| incoming.take())
+    sync_incoming_state()
+        .lock()
+        .ok()
+        .and_then(|mut incoming| incoming.take())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -219,7 +317,46 @@ pub fn run() {
                 )
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![start_sync_host, stop_sync_host, take_sync_incoming])
+        .invoke_handler(tauri::generate_handler![
+            start_sync_host,
+            stop_sync_host,
+            take_sync_incoming,
+            save_sync_package
+        ])
         .run(tauri::generate_context!())
         .expect("error while running dunots");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_bearer_token_case_insensitively() {
+        let headers = "GET /dunots-sync HTTP/1.1\r\nAuthorization: Bearer abc123\r\n";
+        assert_eq!(bearer_token(headers).as_deref(), Some("abc123"));
+        assert_eq!(bearer_token("Authorization: Basic abc123"), None);
+    }
+
+    #[test]
+    fn pairing_consumption_is_one_shot() {
+        let session = SyncSession {
+            package: "{}".to_string(),
+            pairing_token: "pairing".to_string(),
+            session_token: Mutex::new(Some("session".to_string())),
+            pairing_consumed: AtomicBool::new(false),
+        };
+
+        assert!(!session.pairing_consumed.swap(true, Ordering::AcqRel));
+        assert!(session.pairing_consumed.swap(true, Ordering::AcqRel));
+        assert_eq!(
+            session.session_token.lock().unwrap().as_deref(),
+            Some("session")
+        );
+    }
+
+    #[test]
+    fn generated_session_tokens_are_not_equal() {
+        assert_ne!(new_session_token(), new_session_token());
+    }
 }
