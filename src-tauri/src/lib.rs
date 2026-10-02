@@ -281,6 +281,55 @@ fn save_sync_package(app: tauri::AppHandle, package: String) -> Result<String, S
     Ok(path.to_string_lossy().into_owned())
 }
 
+fn safe_file_stem(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|character| {
+            if character.is_control()
+                || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            {
+                '-'
+            } else {
+                character
+            }
+        })
+        .collect();
+    let trimmed = sanitized.trim().trim_matches('.');
+    if trimmed.is_empty() {
+        "trilha".to_string()
+    } else {
+        trimmed.chars().take(80).collect()
+    }
+}
+
+#[tauri::command]
+fn save_roadmap_import(
+    app: tauri::AppHandle,
+    title: String,
+    text: String,
+) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Err("A trilha não possui tópicos para exportar.".to_string());
+    }
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| format!("Não foi possível localizar a pasta Downloads: {error}"))?;
+    fs::create_dir_all(&downloads)
+        .map_err(|error| format!("Não foi possível preparar a pasta Downloads: {error}"))?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    let path = downloads.join(format!(
+        "{}-importacao-{timestamp}.txt",
+        safe_file_stem(&title)
+    ));
+    fs::write(&path, text)
+        .map_err(|error| format!("Não foi possível salvar a exportação: {error}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn stop_sync_host() {
     if let Ok(mut current) = sync_stop_state().lock() {
@@ -321,7 +370,8 @@ pub fn run() {
             start_sync_host,
             stop_sync_host,
             take_sync_incoming,
-            save_sync_package
+            save_sync_package,
+            save_roadmap_import
         ])
         .run(tauri::generate_context!())
         .expect("error while running dunots");
