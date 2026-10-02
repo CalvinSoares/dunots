@@ -1,63 +1,29 @@
 import { storage } from "@core/lib/storage";
+import { SYNC_COLLECTIONS } from "@core/types/sync";
+import type {
+  ConflictChoice,
+  SyncCollection,
+  SyncConflict,
+  SyncHostInfo,
+  SyncIdentity,
+  SyncPackage,
+  SyncPairingInvite,
+  SyncPreview,
+  SyncRecord,
+} from "@core/types/sync";
 
-export const SYNC_COLLECTIONS = [
-  "flashcards",
-  "leetcode_problems",
-  "articles",
-  "snippets",
-  "study_phases",
-  "diagrams",
-  "quiz_exams",
-  "quiz_questions",
-  "quiz_attempts",
-  "study_roadmaps",
-  "roadmap_nodes",
-  "roadmap_links",
-  "sync_tombstones",
-] as const;
-
-export type SyncCollection = typeof SYNC_COLLECTIONS[number];
-export type SyncRecord = { id: string; updatedAt?: string; createdAt?: string; deletedAt?: string; collection?: string; recordId?: string; [key: string]: unknown };
-export type ConflictChoice = "local" | "incoming";
-
-export interface SyncIdentity {
-  deviceId: string;
-  deviceName: string;
-}
-
-export interface SyncHostInfo {
-  address: string;
-  token: string;
-  expires_at: number;
-}
-
-export interface SyncPackage {
-  format: "dunots-sync";
-  version: 1;
-  exportedAt: string;
-  source: SyncIdentity;
-  collections: Record<SyncCollection, SyncRecord[]>;
-}
-
-export interface SyncConflict {
-  key: string;
-  collection: SyncCollection;
-  id: string;
-  local?: SyncRecord;
-  incoming?: SyncRecord;
-  localUpdatedAt?: string;
-  incomingUpdatedAt?: string;
-}
-
-export interface SyncPreview {
-  added: number;
-  updated: number;
-  deleted: number;
-  unchanged: number;
-  conflicts: number;
-  conflictRecords: SyncConflict[];
-  byCollection: Array<{ collection: SyncCollection; added: number; updated: number; deleted: number; unchanged: number; conflicts: number }>;
-}
+export { SYNC_COLLECTIONS } from "@core/types/sync";
+export type {
+  ConflictChoice,
+  SyncCollection,
+  SyncConflict,
+  SyncHostInfo,
+  SyncIdentity,
+  SyncPackage,
+  SyncPairingInvite,
+  SyncPreview,
+  SyncRecord,
+} from "@core/types/sync";
 
 const DEVICE_ID_KEY = "dunots.device-id";
 const DEVICE_NAME_KEY = "dunots.device-name";
@@ -69,6 +35,37 @@ function makeDeviceId() {
 
 export function makePairingToken() {
   return makeDeviceId();
+}
+
+export function encodePairingInvite(host: SyncHostInfo): string {
+  const invite: SyncPairingInvite = {
+    format: "dunots-pairing",
+    version: 1,
+    address: host.address,
+    token: host.token,
+    expiresAt: new Date(host.expires_at * 1000).toISOString(),
+  };
+  return JSON.stringify(invite);
+}
+
+export function parsePairingInvite(value: unknown): SyncPairingInvite {
+  if (!value || typeof value !== "object") throw new Error("Convite de pareamento inválido.");
+  const raw = value as Partial<SyncPairingInvite>;
+  const isLegacy = raw.format === undefined && raw.version === undefined;
+  if ((!isLegacy && (raw.format !== "dunots-pairing" || raw.version !== 1)) || typeof raw.address !== "string" || typeof raw.token !== "string" || typeof raw.expiresAt !== "string") {
+    throw new Error("Este QR Code não contém um convite Dunots compatível.");
+  }
+  const expiresAt = Date.parse(raw.expiresAt);
+  if (!/^https?:\/\//i.test(raw.address) || !raw.token.trim() || Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
+    throw new Error("O convite de pareamento está incompleto ou expirado.");
+  }
+  return {
+    format: "dunots-pairing",
+    version: 1,
+    address: raw.address,
+    token: raw.token,
+    expiresAt: raw.expiresAt,
+  };
 }
 
 export function getDeviceIdentity(): SyncIdentity {
